@@ -8,12 +8,12 @@
     "test": "jest"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "ethers": "^6.11.1",
     "express": "^4.19.2",
     "ioredis": "^5.4.1",
-    "openai": "^6.33.0",
     "zod": "^3.23.6"
   },
   "devDependencies": {

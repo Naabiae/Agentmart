@@ -1,15 +1,8 @@
 import { z } from "zod";
-import OpenAI from "openai";
+import { GoogleGenerativeAI, Schema, SchemaType } from "@google/generative-ai";
 import * as dotenv from "dotenv";
 
 dotenv.config();
-
-// Connect to a local or hosted OpenAI-compatible Gemma 4 endpoint
-// Examples: Ollama (http://localhost:11434/v1), vLLM, or Hugging Face Inference Endpoints
-const openai = new OpenAI({
-  apiKey: process.env.GEMMA_API_KEY || "sk-dummy-key",
-  baseURL: process.env.GEMMA_API_BASE_URL || "http://localhost:11434/v1", // Defaulting to local Ollama
-});
 
 export const orderSpecSchema = z.object({
   itemDescription: z.string().min(10, "Description must be at least 10 characters"),
@@ -21,57 +14,50 @@ export const orderSpecSchema = z.object({
 
 export type OrderSpec = z.infer<typeof orderSpecSchema>;
 
+const geminiSchema: Schema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    itemDescription: { type: SchemaType.STRING, description: "Detailed description of what the user wants" },
+    category: { type: SchemaType.STRING, description: "Category (Goods, Services, Digital, Logistics, Other)" },
+    budgetNative: { type: SchemaType.NUMBER, description: "Budget in USD" },
+    deadlineDays: { type: SchemaType.INTEGER, description: "Number of days from now until deadline" },
+    location: { type: SchemaType.STRING, description: "Delivery or service location" }
+  },
+  required: ["itemDescription", "category", "budgetNative", "deadlineDays", "location"]
+};
+
 export class DemandAgent {
   async parseRequest(prompt: string): Promise<OrderSpec> {
-    if (!process.env.GEMMA_API_KEY || process.env.GEMMA_API_KEY === "sk-dummy-key") {
-      // Mock mode for tests/no-key environments
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === "sk-dummy-key") {
+      console.log("No Gemini API key found, using mock.");
       return this.mockParse(prompt);
     }
 
-    const response = await openai.chat.completions.create({
-      model: process.env.GEMMA_MODEL_NAME || "gemma-4:31b", // Targeting Gemma 4 31B Dense model
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert AI agent that extracts structured e-commerce orders from natural language requests. You MUST respond with a JSON object that satisfies the provided schema."
-        },
-        { 
-          role: "user", 
-          content: prompt 
-        }
-      ],
-      tools: [
-        {
-          type: "function",
-          function: {
-            name: "extract_order",
-            description: "Extract structured order information from user request",
-            parameters: {
-              type: "object",
-              properties: {
-                itemDescription: { type: "string", description: "Detailed description of what the user wants" },
-                category: { type: "string", enum: ["Goods", "Services", "Digital", "Logistics", "Other"] },
-                budgetNative: { type: "number", description: "Budget in USD" },
-                deadlineDays: { type: "integer", description: "Number of days from now until deadline" },
-                location: { type: "string", description: "Delivery or service location" }
-              },
-              required: ["itemDescription", "category", "budgetNative", "deadlineDays", "location"]
-            }
-          }
-        }
-      ],
-      tool_choice: { type: "function", function: { name: "extract_order" } }
+    const genAI = new GoogleGenerativeAI(apiKey);
+    
+    // We use gemini-1.5-flash as it is fast and supports structured JSON schema output
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.0-flash-lite",
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: geminiSchema,
+      }
     });
 
-    const toolCall = response.choices[0].message.tool_calls?.[0] as any;
-    if (!toolCall) throw new Error("Failed to extract order details using Gemma 4");
-
-    const args = JSON.parse(toolCall.function.arguments);
-    return orderSpecSchema.parse(args);
+    const result = await model.generateContent(`Extract the e-commerce order details from the following natural language request:\n\n"${prompt}"`);
+    const text = result.response.text();
+    
+    try {
+      const parsed = JSON.parse(text);
+      return orderSpecSchema.parse(parsed);
+    } catch (e) {
+      console.error("Failed to parse Gemini output:", text);
+      throw e;
+    }
   }
 
   private mockParse(prompt: string): OrderSpec {
-    // Simple mock for tests
     return {
       itemDescription: "Laptop bag delivery",
       category: "Goods",
