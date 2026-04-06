@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { RampAgent } from "./RampAgent";
 
 describe("RampAgent", () => {

@@ -1,8 +1,6 @@
 import { ethers } from "ethers";
 import { getDeployments, getProvider, getWallet } from "./client";
-
-// In a real project we'd use TypeChain bindings.
-// For the MVP we use minimal ABIs to interact with the deployed contracts.
+export { getDeployments, getProvider, getWallet };
 
 const AgentRegistryABI = [
     "function getAgent(address) view returns (tuple(address agentAddress, string passportId, uint256 totalOrders, uint256 totalDisputes, uint256 reputationScore, bool isActive))",
