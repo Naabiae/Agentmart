@@ -18,13 +18,40 @@ export class MatchingAgent {
         contracts.BidEngine.on("BidPlaced", async (orderId, bidId, seller, priceWei, estimatedDelivery) => {
             await this.scoreBids(orderId);
         });
+
+        // Add listener for BidAccepted to generate x402 payload
+        contracts.BidEngine.on("BidAccepted", async (orderId, bidId) => {
+            await this.generateX402Payload(orderId, bidId);
+        });
     }
 
     stop() {
         this.isRunning = false;
         const contracts = getContracts();
         contracts.BidEngine.removeAllListeners("BidPlaced");
+        contracts.BidEngine.removeAllListeners("BidAccepted");
         console.log(`[MatchingAgent] Stopped.`);
+    }
+
+    private async generateX402Payload(orderId: string, bidId: string) {
+        console.log(`[MatchingAgent] Generating x402 approve_payment payload for order ${orderId} and bid ${bidId}`);
+        const contracts = getContracts();
+        const order = await contracts.OrderBook.getOrder(orderId);
+        const bid = await contracts.BidEngine.getBid(bidId);
+
+        const x402Payload = {
+            action: "approve_payment",
+            orderId: orderId,
+            bidId: bidId,
+            buyer: order.buyer,
+            seller: bid.seller,
+            paymentAmount: bid.priceWei.toString(),
+            currency: "KITE_USDC"
+        };
+
+        // Write to redis
+        await this.redis.set(`x402_payment:${orderId}`, JSON.stringify(x402Payload));
+        console.log(`[MatchingAgent] x402 payload saved to Redis`);
     }
 
     private async scoreBids(orderId: string) {
@@ -38,7 +65,7 @@ export class MatchingAgent {
         let minPrice = bids[0].priceWei;
         let maxEta = bids[0].estimatedDelivery;
         let minEta = bids[0].estimatedDelivery;
-        let maxRep = bids[0].reputationScore || 1;
+        let maxRep = bids[0].reputationScore || 1n;
 
         for (const bid of bids) {
             if (bid.priceWei > maxPrice) maxPrice = bid.priceWei;
@@ -54,7 +81,16 @@ export class MatchingAgent {
             const repScore = Number(bid.reputationScore) / Number(maxRep);
 
             const score = (0.5 * priceScore) + (0.3 * etaScore) + (0.2 * repScore);
-            return { ...bid, score };
+            return { 
+                bidId: bid.bidId,
+                orderId: bid.orderId,
+                seller: bid.seller,
+                priceWei: bid.priceWei.toString(),
+                estimatedDelivery: bid.estimatedDelivery.toString(),
+                reputationScore: bid.reputationScore.toString(),
+                status: bid.status.toString(),
+                score 
+            };
         });
 
         scoredBids.sort((a: any, b: any) => b.score - a.score);

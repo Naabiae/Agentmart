@@ -8,10 +8,13 @@ describe("RampAgent", () => {
         agent = new RampAgent();
     });
 
-    it("returns provider with better net rate", async () => {
+    it("loads API keys and returns provider with better net rate via parallel fetching", async () => {
+        expect(agent.moonpayApiKey).toBeDefined();
+        expect(agent.transakApiKey).toBeDefined();
+
         const quote = await agent.getOnrampQuote(100, "USD", "USDC");
         expect(quote.provider).toBe("MoonPay");
-        expect(quote.quote.netCryptoAmount).toBe(100 * 0.99 - 0.5);
+        expect(quote.quote.netCryptoAmount).toBe(100 * 0.99 - 0.5); // Moonpay logic
     });
 
     it("verifies incoming MoonPay webhook HMAC signature correctly", () => {

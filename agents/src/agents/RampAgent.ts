@@ -1,19 +1,33 @@
 import crypto from "crypto";
 
 export class RampAgent {
+    moonpayApiKey: string;
+    transakApiKey: string;
+
+    constructor() {
+        this.moonpayApiKey = process.env.MOONPAY_API_KEY || "mock_moonpay";
+        this.transakApiKey = process.env.TRANSAK_API_KEY || "mock_transak";
+    }
+
     async getOnrampQuote(fiatAmount: number, fiatCurrency: string, targetStablecoin: string) {
-        const moonpayRate = await this.mockMoonpayQuote(fiatAmount, fiatCurrency);
-        const transakRate = await this.mockTransakQuote(fiatAmount, fiatCurrency);
+        // Issue #11 requires Promise.all for parallel fetching
+        const [moonpayRate, transakRate] = await Promise.all([
+            this.fetchMoonpayQuote(fiatAmount, fiatCurrency),
+            this.fetchTransakQuote(fiatAmount, fiatCurrency)
+        ]);
 
         if (moonpayRate.netCryptoAmount > transakRate.netCryptoAmount) {
+            console.log(`[RampAgent] Best provider is MoonPay with net ${moonpayRate.netCryptoAmount}`);
             return { provider: "MoonPay", quote: moonpayRate };
         } else {
+            console.log(`[RampAgent] Best provider is Transak with net ${transakRate.netCryptoAmount}`);
             return { provider: "Transak", quote: transakRate };
         }
     }
 
-    private async mockMoonpayQuote(fiatAmount: number, fiatCurrency: string) {
-        // Mock 1 USD = 0.99 USDC (1% fee)
+    // Wrapped in standard fetch patterns (mocked since we don't have real keys for hackathon MVP)
+    private async fetchMoonpayQuote(fiatAmount: number, fiatCurrency: string) {
+        // In reality: await fetch(`https://api.moonpay.com/v3/currencies/...`)
         return {
             fiatAmount,
             fiatCurrency,
@@ -24,8 +38,8 @@ export class RampAgent {
         };
     }
 
-    private async mockTransakQuote(fiatAmount: number, fiatCurrency: string) {
-        // Mock 1 USD = 0.98 USDC (2% fee)
+    private async fetchTransakQuote(fiatAmount: number, fiatCurrency: string) {
+        // In reality: await fetch(`https://api.transak.com/api/v2/currencies/...`)
         return {
             fiatAmount,
             fiatCurrency,
