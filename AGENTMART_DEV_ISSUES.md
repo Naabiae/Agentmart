@@ -177,7 +177,7 @@ The demand-side heart of AgentMart. A contract where buyers post structured purc
 
 **How to build it**
 
-Create `contracts/OrderBook.sol`. Import `IAgentMart.sol` and reference `AgentRegistry` for the `isRegistered` modifier. The `createOrder(string description, uint256 budgetWei, uint256 deadlineTimestamp, string location)` function accepts payment (native token for hackathon), generates a unique `orderId` using `keccak256(abi.encodePacked(msg.sender, block.timestamp, nonce))`, stores the Order struct, and emits an `OrderCreated` event. Add `cancelOrder(bytes32 orderId)` — only callable by the buyer if status is still `Open`. Add `getOrder(bytes32)` and `getOpenOrders(uint256 offset, uint256 limit)` view functions. The paginated `getOpenOrders` avoids unbounded gas costs. Use a `mapping(bytes32 => Order)` for storage and a `bytes32[]` array to track all order IDs.
+Create `contracts/OrderBook.sol`. Import `IAgentMart.sol` and reference `AgentRegistry` for the `isRegistered` modifier. The `createOrder(string description, uint256 budgetWei, uint256 deadlineTimestamp, string location)` function accepts payment (native token for hackathon), generates a unique `orderId` using `keccak256(abi.encodePacked(msg.sender, block.timestamp, ++userNonces[msg.sender]))` (requiring a `mapping(address => uint256) userNonces` state variable), stores the Order struct, and emits an `OrderCreated` event. Add `cancelOrder(bytes32 orderId)` — only callable by the buyer if status is still `Open`. Add `getOrder(bytes32)` and `getOpenOrders(uint256 offset, uint256 limit)` view functions. The paginated `getOpenOrders` avoids unbounded gas costs. Use a `mapping(bytes32 => Order)` for storage and a `bytes32[]` array to track all order IDs.
 
 **Resources**
 
@@ -213,7 +213,7 @@ The supply-side matching engine. Registered sellers submit bids on open orders. 
 
 **How to build it**
 
-Create `contracts/BidEngine.sol`. It holds references to `AgentRegistry`, `OrderBook`, and an explicit `address public deliveryTracker` (with an `IDeliveryTracker` interface). Update every "holds references" section to use constructor injection + immutable storage. Add a comment: "Replace Ownable with Gnosis Safe post-hackathon". The `placeBid(bytes32 orderId, uint256 priceWei, uint256 estimatedDelivery)` function checks the order is `Open`, the bidder is registered, and the bidder is not the buyer. It stores the bid and emits `BidPlaced`. The `acceptBid(bytes32 orderId, bytes32 bidId)` function is callable only by the order's buyer. It changes the order status to `Matched`, changes the bid status to `Accepted`, changes all other bids for that order to `Rejected`, and locks the buyer's budget into an internal escrow mapping (`mapping(bytes32 => uint256) escrowBalance`). Add `releaseEscrow(bytes32 orderId)` callable only by the buyer once they mark delivery confirmed — it sends funds to the seller. Add `refundEscrow(bytes32 orderId)` callable by owner in dispute cases. Inherit OpenZeppelin's `ReentrancyGuard` and apply the `nonReentrant` modifier to all fund-moving functions. Emit events for every state transition.
+Create `contracts/BidEngine.sol`. It holds references to `AgentRegistry`, `OrderBook`, and an explicit `address public deliveryTracker` (with an `IDeliveryTracker` interface). Update every "holds references" section to use constructor injection + immutable storage. Add a comment: "Replace Ownable with Gnosis Safe post-hackathon". The `placeBid(bytes32 orderId, uint256 priceWei, uint256 estimatedDelivery)` function checks the order is `Open`, the bidder is registered, and the bidder is not the buyer. It stores the bid and emits `BidPlaced`. The `acceptBid(bytes32 orderId, bytes32 bidId)` function is callable only by the order's buyer. It changes the order status to `Matched`, changes the bid status to `Accepted`, changes all other bids for that order to `Rejected`, and locks the buyer's budget into an internal escrow mapping (`mapping(bytes32 => uint256) escrowBalance`). Add `releaseEscrow(bytes32 orderId)` callable ONLY by the `DeliveryTracker` contract — it sends funds to the seller. Also expose a `getBidsForOrder(bytes32 orderId)` view function. Add `refundEscrow(bytes32 orderId)` callable by owner in dispute cases. Inherit OpenZeppelin's `ReentrancyGuard` and apply the `nonReentrant` modifier to all fund-moving functions. Emit events for every state transition.
 
 **Resources**
 
@@ -294,7 +294,7 @@ A full deployment script that deterministicly deploys all contracts and writes a
 
 **How to build it**
 
-Create `scripts/deploy/full.ts`. It should deploy `AgentRegistry`, then `OrderBook`, `BidEngine`, and `DeliveryTracker` using constructor injection. Save all deployed addresses to `deployments/kite_testnet.json`. 
+Create `scripts/deploy/full.ts`. It should deploy `AgentRegistry`, `OrderBook`, `ProtocolFee`, then `BidEngine` (passing ProtocolFee address), and finally `DeliveryTracker` (passing BidEngine address). Then call `BidEngine.setDeliveryTracker(DeliveryTracker.address)` to resolve the circular dependency. Save all deployed addresses to `deployments/kite_testnet.json`. 
 
 **Resources**
 
@@ -419,7 +419,7 @@ Two additional agent services: `MatchingAgent` listens for `BidPlaced` events an
 
 **How to build it**
 
-`MatchingAgent`: Create `agents/src/agents/MatchingAgent.ts`. Use ethers.js event listeners on the `BidEngine` contract to subscribe to `BidPlaced(orderId, bidId, seller, price, eta)` events. On each event, fetch all bids for that order and score them using the formula: `score = (0.5 × priceScore) + (0.3 × etaScore) + (0.2 × reputationScore)` where each component is normalized to 0–1 across all bids for that order. Sort descending. Write ranked bid data to a Redis key or simple JSON file that the frontend can poll. Add optional x402 `approve_payment` payload generation when a bid is accepted.
+`MatchingAgent`: Create `agents/src/agents/MatchingAgent.ts`. Use ethers.js event listeners on the `BidEngine` contract to subscribe to `BidPlaced(orderId, bidId, seller, price, eta)` events. On each event, fetch all bids for that order and score them using the formula: `score = (0.5 × priceScore) + (0.3 × etaScore) + (0.2 × reputationScore)` where each component is normalized to 0–1 across all bids for that order. Sort descending. Write ranked bid data to a Redis key or simple JSON file, and expose a `GET /api/bids/:orderId` Express endpoint for the frontend to poll. Add optional x402 `approve_payment` payload generation when a bid is accepted.
 
 `RampAgent`: Create `agents/src/agents/RampAgent.ts`. Load MoonPay and Transak API keys from `.env`. Expose a `getOnrampQuote(fiatAmount, fiatCurrency, targetStablecoin)` async function that calls both APIs in parallel via `Promise.all`, compares net amounts, and returns the better provider. Write tests using mocked API responses.
 
@@ -464,7 +464,7 @@ The full onramp/offramp flow. A buyer initiates a purchase in fiat — the RampA
 
 **How to build it**
 
-Extend `RampAgent` with a full webhook listener using an Express.js endpoint at `/ramp/webhook`. Handle MoonPay's `transaction_completed` webhook and Transak's `ORDER_COMPLETED` webhook. Verify webhook signatures using HMAC with the provider's shared secret — never accept unverified webhooks. On confirmed completion, parse the received USDC amount and call `OrderBook.createOrder`. For the offramp (seller payout): after `BidEngine.releaseEscrow`, call the Transak or MoonPay offramp API to initiate a USDC → bank transfer with the seller's bank details (stored off-chain only, never on-chain). Test using provider sandbox environments — both MoonPay and Transak have dedicated sandbox modes with test cards.
+Extend `RampAgent` with a full webhook listener using an Express.js endpoint at `/ramp/webhook`. Handle MoonPay's `transaction_completed` webhook and Transak's `ORDER_COMPLETED` webhook. Verify webhook signatures using HMAC with the provider's shared secret — never accept unverified webhooks. On confirmed completion, parse the received KITE amount and emit an SSE to the frontend so the connected buyer wallet can sign and execute `OrderBook.createOrder`. For the offramp (seller payout): after `BidEngine.releaseEscrow`, call the Transak or MoonPay offramp API to initiate a USDC → bank transfer with the seller's bank details (stored off-chain only, never on-chain). Test using provider sandbox environments — both MoonPay and Transak have dedicated sandbox modes with test cards.
 
 **Resources**
 
