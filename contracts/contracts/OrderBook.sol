@@ -155,7 +155,8 @@ contract OrderBook is Ownable, ReentrancyGuard {
         return openOrders;
     }
 
-    function updateOrderStatus(bytes32 orderId, IAgentMart.OrderStatus status, bytes32 acceptedBidId) external onlyBidEngine {
+    function updateOrderStatus(bytes32 orderId, IAgentMart.OrderStatus status, bytes32 acceptedBidId) external {
+        require(msg.sender == bidEngine || msg.sender == deliveryTracker, "Only BidEngine or DeliveryTracker");
         orders[orderId].status = status;
         if (acceptedBidId != bytes32(0)) {
             orders[orderId].acceptedBidId = acceptedBidId;
@@ -171,11 +172,13 @@ contract OrderBook is Ownable, ReentrancyGuard {
 
         IAgentMart.Bid memory acceptedBid = IBidEngine(bidEngine).getBid(order.acceptedBidId);
         
-        uint256 feeAmount = protocolFee.calculateFee(acceptedBid.priceWei);
+        uint256 feeAmount = address(protocolFee) != address(0) ? protocolFee.calculateFee(acceptedBid.priceWei) : 0;
         uint256 sellerAmount = acceptedBid.priceWei - feeAmount;
         uint256 refundToBuyer = order.budgetWei - acceptedBid.priceWei;
 
-        require(usdc.transfer(protocolFee.feeRecipient(), feeAmount), "Fee transfer failed");
+        if (feeAmount > 0) {
+            require(usdc.transfer(protocolFee.feeRecipient(), feeAmount), "Fee transfer failed");
+        }
         require(usdc.transfer(acceptedBid.seller, sellerAmount), "Seller transfer failed");
         
         if (refundToBuyer > 0) {
