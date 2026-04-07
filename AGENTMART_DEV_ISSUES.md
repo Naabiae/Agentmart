@@ -41,7 +41,7 @@ A clean monorepo with separate workspaces for contracts, backend agents, and fro
 
 **How to build it**
 
-Initialize a monorepo using npm workspaces or pnpm workspaces with three top-level folders: `contracts/`, `agents/`, and `frontend/`. Inside `contracts/`, initialize a Hardhat project. Install `hardhat`, `@nomicfoundation/hardhat-toolbox`, and `dotenv`. Configure `hardhat.config.ts` with two networks: `hardhat` (local) and `kite_testnet`. The Kite Ozone testnet RPC and chain ID are in the Kite docs network information page. Store the deployer private key in a `.env` file and add `.env` to `.gitignore` immediately. Write a minimal `Counter.sol` contract with an increment function and a public getter. Write a Hardhat deploy script and a Hardhat test. Run the test on the local Hardhat network first, then deploy to Kite testnet using the deploy script.
+Initialize a monorepo using npm workspaces or pnpm workspaces with three top-level folders: `contracts/`, `agents/`, and `frontend/`. Inside `contracts/`, initialize a Hardhat project. Install `hardhat`, `@nomicfoundation/hardhat-toolbox`, and `dotenv`. Configure `hardhat.config.ts` with two networks: `hardhat` (local) and `kite_testnet`. The Kite Ozone testnet RPC and chain ID are in the Kite docs network information page. Create `docs/kite-testnet-config.md` with the canonical values fetched from the docs or faucet page. Record testnet stablecoin (USDC.e/PYUSD) addresses in `deployments/kite_testnet.json`. Store the deployer private key in a `.env` file and add `.env` to `.gitignore` immediately. Write a minimal `Counter.sol` contract with an increment function and a public getter. Write a Hardhat deploy script and a Hardhat test. Run the test on the local Hardhat network first, then deploy to Kite testnet using the deploy script.
 
 **Resources**
 
@@ -78,7 +78,7 @@ Solidity interfaces and shared enums/structs that all contracts will import. A `
 
 **How to build it**
 
-Create a `contracts/interfaces/` directory. Define a `IAgentMart.sol` file that declares: an `OrderStatus` enum (Open, Matched, InProgress, Delivered, Disputed, Completed, Cancelled), a `BidStatus` enum (Active, Accepted, Rejected), an `Order` struct (orderId, buyer, itemDescription, budgetWei, deadline, location, status, acceptedBidId), a `Bid` struct (bidId, orderId, seller, priceWei, estimatedDelivery, reputationScore, status), and an `AgentProfile` struct (agentAddress, passportId, totalOrders, totalDisputes, reputationScore, isActive). These types will be imported by every contract going forward. Write a Hardhat test that simply compiles the interface and confirms the struct sizes are as expected using Hardhat's `ethers` ABI encoder — this ensures no naming conflicts or type errors.
+Create a `contracts/interfaces/` directory. Define a `IAgentMart.sol` file that declares: an `OrderStatus` enum (Open, Matched, InProgress, Delivered, Disputed, Completed, Cancelled), a `BidStatus` enum (Active, Accepted, Rejected), an `OrderCategory` enum (Goods, Services, Digital, Logistics, Other), an `Order` struct (orderId, buyer, itemDescription, category, budgetWei, deadline, location, status, acceptedBidId), a `Bid` struct (bidId, orderId, seller, priceWei, estimatedDelivery, reputationScore, status), and an `AgentProfile` struct (agentAddress, passportId, totalOrders, totalDisputes, reputationScore, isActive). These types will be imported by every contract going forward. Write a Hardhat test that simply compiles the interface and confirms the struct sizes are as expected using Hardhat's `ethers` ABI encoder — this ensures no naming conflicts or type errors.
 
 **Resources**
 
@@ -143,7 +143,7 @@ A contract that registers buyer and seller agents on-chain, stores their Kite Pa
 
 **How to build it**
 
-Create `contracts/AgentRegistry.sol`. It imports `IAgentMart.sol` for the `AgentProfile` struct. It exposes a `registerAgent(string passportId)` function that creates a new `AgentProfile` keyed by `msg.sender`, stores the passportId string, sets reputation to a baseline (e.g. 50 out of 100), and marks `isActive = true`. It reverts if the agent is already registered. Expose a `getAgent(address)` view function. Add an `isRegistered(address)` modifier that other contracts will use. Add an owner-only `deactivateAgent(address)` for dispute resolution. Use OpenZeppelin's `Ownable` for admin functions. Write full tests covering: registration success, duplicate registration revert, getAgent return, and deactivation.
+Create `contracts/AgentRegistry.sol`. It imports `IAgentMart.sol` for the `AgentProfile` struct. It exposes a `registerAgent(string passportId)` function that creates a new `AgentProfile` keyed by `msg.sender`, stores the passportId string, sets reputation to a baseline (e.g. 50 out of 100), and marks `isActive = true`. It reverts if the agent is already registered. For MVP, just store the developer's fixed Passport ID and add a view `isValidPassport(string memory)` that always returns true on testnet. Expose a `getAgent(address)` view function. Add a comment: "Replace Ownable with Gnosis Safe post-hackathon". Add an `isRegistered(address)` modifier that other contracts will use. Add an owner-only `deactivateAgent(address)` for dispute resolution. Use OpenZeppelin's `Ownable` for admin functions. Write full tests covering: registration success, duplicate registration revert, getAgent return, and deactivation.
 
 **Resources**
 
@@ -177,7 +177,7 @@ The demand-side heart of AgentMart. A contract where buyers post structured purc
 
 **How to build it**
 
-Create `contracts/OrderBook.sol`. Import `IAgentMart.sol` and reference `AgentRegistry` for the `isRegistered` modifier. The `createOrder(string description, uint256 budgetWei, uint256 deadlineTimestamp, string location)` function accepts payment (native token for hackathon), generates a unique `orderId` using `keccak256(abi.encodePacked(msg.sender, block.timestamp, nonce))`, stores the Order struct, and emits an `OrderCreated` event. Add `cancelOrder(bytes32 orderId)` — only callable by the buyer if status is still `Open`. Add `getOrder(bytes32)` and `getOpenOrders(uint256 offset, uint256 limit)` view functions. The paginated `getOpenOrders` avoids unbounded gas costs. Use a `mapping(bytes32 => Order)` for storage and a `bytes32[]` array to track all order IDs.
+Create `contracts/OrderBook.sol`. Import `IAgentMart.sol` and reference `AgentRegistry` for the `isRegistered` modifier. The `createOrderGasless(address buyer, string description, uint256 budgetWei, uint256 deadlineTimestamp, string location, uint256 validAfter, uint256 validBefore, bytes32 nonce, uint8 v, bytes32 r, bytes32 s)` function accepts USDC via EIP-3009 gasless transfer. It calls `USDC.transferWithAuthorization(buyer, address(this), budgetWei, ...)` to pull funds directly from the buyer into the `OrderBook` contract. It generates a unique `orderId` using `keccak256(abi.encodePacked(buyer, block.timestamp, ++userNonces[buyer]))` (requiring a `mapping(address => uint256) userNonces` state variable), stores the Order struct, and emits an `OrderCreated` event. Add `cancelOrder(bytes32 orderId)` — only callable by the buyer if status is still `Open`. Add `getOrder(bytes32)` and `getOpenOrders(uint256 offset, uint256 limit)` view functions. The paginated `getOpenOrders` avoids unbounded gas costs. Use a `mapping(bytes32 => Order)` for storage and a `bytes32[]` array to track all order IDs.
 
 **Resources**
 
@@ -213,7 +213,7 @@ The supply-side matching engine. Registered sellers submit bids on open orders. 
 
 **How to build it**
 
-Create `contracts/BidEngine.sol`. It holds references to `AgentRegistry` and `OrderBook`. The `placeBid(bytes32 orderId, uint256 priceWei, uint256 estimatedDelivery)` function checks the order is `Open`, the bidder is registered, and the bidder is not the buyer. It stores the bid and emits `BidPlaced`. The `acceptBid(bytes32 orderId, bytes32 bidId)` function is callable only by the order's buyer. It changes the order status to `Matched`, changes the bid status to `Accepted`, changes all other bids for that order to `Rejected`, and locks the buyer's budget into an internal escrow mapping (`mapping(bytes32 => uint256) escrowBalance`). Add `releaseEscrow(bytes32 orderId)` callable only by the buyer once they mark delivery confirmed — it sends funds to the seller. Add `refundEscrow(bytes32 orderId)` callable by owner in dispute cases. Inherit OpenZeppelin's `ReentrancyGuard` and apply the `nonReentrant` modifier to all fund-moving functions. Emit events for every state transition.
+Create `contracts/BidEngine.sol`. It holds references to `AgentRegistry`, `OrderBook`, and an explicit `address public deliveryTracker` (with an `IDeliveryTracker` interface). Update every "holds references" section to use constructor injection + immutable storage. Add a comment: "Replace Ownable with Gnosis Safe post-hackathon". The `placeBid(bytes32 orderId, uint256 priceWei, uint256 estimatedDelivery)` function checks the order is `Open`, the bidder is registered, and the bidder is not the buyer. It stores the bid and emits `BidPlaced`. The `acceptBid(bytes32 orderId, bytes32 bidId)` function is callable only by the order's buyer. It changes the order status to `Matched`, changes the bid status to `Accepted`, changes all other bids for that order to `Rejected`. Since `OrderBook` already holds the USDC from `createOrderGasless`, `BidEngine` simply updates the statuses. Move the `releaseEscrow(bytes32 orderId)` and `refundEscrow(bytes32 orderId)` functions into `OrderBook`, but make them callable ONLY by the `DeliveryTracker` contract or the owner (for refunds). `releaseEscrow` sends the USDC to the seller. Also expose a `getBidsForOrder(bytes32 orderId)` view function in `BidEngine`. Inherit OpenZeppelin's `ReentrancyGuard` and apply the `nonReentrant` modifier to all fund-moving functions. Emit events for every state transition.
 
 **Resources**
 
@@ -253,7 +253,7 @@ A contract that records on-chain delivery milestones (Dispatched, InTransit, Del
 
 **How to build it**
 
-Create `contracts/DeliveryTracker.sol`. It stores a `mapping(bytes32 => DeliveryMilestone[])` where `DeliveryMilestone` is a struct with `(status, timestamp, note)`. The `postMilestone(bytes32 orderId, string status, string note)` function is callable only by the accepted seller for that order. It appends to the milestone array and emits `MilestonePosted`. Buyers call `confirmDelivery(bytes32 orderId)` which internally calls `BidEngine.releaseEscrow`. Create `contracts/ProtocolFee.sol` as a small module: it holds a `feePercent` variable (100 = 1%), a `feeRecipient` address (your multisig or deployer wallet), and a `calculateFee(uint256 amount)` pure function. The `BidEngine.releaseEscrow` function calls `ProtocolFee.calculateFee` before splitting the payment: fee to `feeRecipient`, remainder to seller. Finish with a full end-to-end integration test simulating a complete order lifecycle across all contracts.
+Create `contracts/DeliveryTracker.sol`. It stores a `mapping(bytes32 => DeliveryMilestone[])` where `DeliveryMilestone` is a struct with `(status, timestamp, note)`. The `postMilestone(bytes32 orderId, string status, string note)` function is callable only by the accepted seller for that order. It appends to the milestone array and emits `MilestonePosted`. Buyers call `confirmDelivery(bytes32 orderId)` which internally calls `OrderBook.releaseEscrow`. Create `contracts/ProtocolFee.sol` as a small module: it holds a `feePercent` variable (100 = 1%), a `feeRecipient` address (your multisig or deployer wallet), and a `calculateFee(uint256 amount)` pure function. The `OrderBook.releaseEscrow` function calls `ProtocolFee.calculateFee` before splitting the USDC payment: fee to `feeRecipient`, remainder to seller. Finish with a full end-to-end integration test simulating a complete order lifecycle across all contracts.
 
 **Resources**
 
@@ -285,6 +285,31 @@ npx hardhat test test/integration/fullOrderLifecycle.test.ts
 
 ---
 
+
+### Issue #7.5 — Full Deployment Script
+
+**What to build**
+
+A full deployment script that deterministicly deploys all contracts and writes addresses to `deployments/kite_testnet.json`.
+
+**How to build it**
+
+Create `scripts/deploy/full.ts`. It should deploy `AgentRegistry`, `OrderBook`, `ProtocolFee`, then `BidEngine` (passing ProtocolFee address), and finally `DeliveryTracker` (passing BidEngine address). Then call `BidEngine.setDeliveryTracker(DeliveryTracker.address)` to resolve the circular dependency. Save all deployed addresses to `deployments/kite_testnet.json`. 
+
+**Resources**
+
+- Hardhat ignition/deploy scripts: https://hardhat.org/hardhat-runner/docs/guides/deploying
+
+**✅ Test pass**
+
+```
+npx hardhat run scripts/deploy/full.ts --network kite_testnet
+  ✓ All contracts deployed and wired correctly
+  ✓ deployments/kite_testnet.json is generated with valid addresses
+```
+
+---
+
 ## Phase 2 — Agent Layer (Backend)
 
 ---
@@ -293,11 +318,11 @@ npx hardhat test test/integration/fullOrderLifecycle.test.ts
 
 **What to build**
 
-The `agents/` workspace initialized as a TypeScript Node.js project. A shared Kite chain client using `ethers.js` that connects to the Kite testnet and reads from the deployed contracts. Environment config with contract addresses loaded from a `deployments.json` file generated by the Hardhat deploy scripts.
+The `agents/` workspace initialized as a TypeScript Node.js project. A shared Kite chain client using `ethers.js` that connects to the Kite testnet and reads from the deployed contracts. Environment config with contract addresses loaded from a `deployments.json` file generated by the Hardhat deploy scripts. Reference `docs/kite-testnet-config.md` for accurate RPC/Chain ID.
 
 **How to build it**
 
-In the `agents/` workspace, initialize a TypeScript project with `ts-node`, `typescript`, and `ethers` (v6). Set up `tsconfig.json` targeting Node 18. Create a `src/chain/client.ts` module that exports a configured provider pointed at Kite testnet RPC and wallet instances for different agent roles (buyer, seller, protocol). Create a `src/chain/contracts.ts` module that imports the ABI from Hardhat's compiled artifacts and instantiates typed contract objects for `AgentRegistry`, `OrderBook`, `BidEngine`, `DeliveryTracker`. Generate TypeChain types from the contract ABIs so all contract calls are type-safe. Write a health check script that calls `getOpenOrders()` and prints the result to confirm connectivity.
+In the `agents/` workspace, initialize a TypeScript project with `ts-node`, `typescript`, `ethers` (v6), and `ioredis`. Initialize an Express + ts-rest or tRPC server in `agents/` with routes for DemandAgent parse, SSE events, and Ramp webhook. Set up `tsconfig.json` targeting Node 18. Create a `src/chain/client.ts` module that exports a configured provider pointed at Kite testnet RPC and wallet instances for different agent roles (buyer, seller, protocol). Create a `src/chain/contracts.ts` module that imports the ABI from Hardhat's compiled artifacts and instantiates typed contract objects for `AgentRegistry`, `OrderBook`, `BidEngine`, `DeliveryTracker`. Generate TypeChain types from the contract ABIs so all contract calls are type-safe. Write a health check script that calls `getOpenOrders()` and prints the result to confirm connectivity.
 
 **Resources**
 
@@ -326,7 +351,7 @@ A Node.js agent service (`DemandAgent`) that accepts a natural language string f
 
 **How to build it**
 
-Create `agents/src/agents/DemandAgent.ts`. Use the Anthropic API (claude-sonnet-4-20250514) with tool use / structured output to extract: `itemDescription` (string), `budgetNative` (number in ETH units), `deadlineDays` (integer), and `location` (string). Define a JSON schema for the extraction output and validate it with `zod`. On successful parse, call `OrderBook.createOrder` with the extracted fields, converting `budgetNative` to `BigInt` wei. Emit a success event with the generated `orderId`. Add input validation: budget must be > 0, deadline must be > now, description must be >= 10 chars. Write unit tests using mocked LLM responses (no real API calls in CI) that cover the happy path and edge cases.
+Create `agents/src/agents/DemandAgent.ts`. Use the Anthropic API (claude-sonnet-4-20250514) with tool use / structured output to extract: `itemDescription` (string), `category` (enum), `budgetNative` (number in ETH units), `deadlineDays` (integer), and `location` (string). Define a JSON schema for the extraction output and validate it with `zod`. On successful parse, return the structured data to the frontend (the frontend will handle signing and calling `OrderBook.createOrder`). Add input validation: budget must be > 0, deadline must be > now, description must be >= 10 chars. Write unit tests using mocked LLM responses (no real API calls in CI) that cover the happy path and edge cases.
 
 **Resources**
 
@@ -346,8 +371,7 @@ npx jest agents/src/agents/DemandAgent.test.ts
     ✓ extracted deadlineDays is integer > 0
     ✓ rejects input with budget = 0
     ✓ rejects input with description under 10 chars
-    ✓ submits parsed order to OrderBook (mocked contract)
-    ✓ returns orderId on success
+    ✓ returns parsed structured order data to frontend
   8 passing (900ms)
 ```
 
@@ -361,7 +385,7 @@ A Node.js agent service (`SupplyAgent`) that represents a registered seller. It 
 
 **How to build it**
 
-Create `agents/src/agents/SupplyAgent.ts`. It takes a configuration object: `sellerWallet`, `categories` (array of strings), `maxBudgetWei`, `location`, `bidMarginPercent` (default: seller bids at 90% of buyer's budget). On a configurable polling interval (default 30s using `setInterval`), it calls `OrderBook.getOpenOrders(0, 20)`, filters orders by category match and budget threshold, and for each matching order checks if the seller has already bid (by querying `BidEngine.getBidsForOrder`). If not, it constructs a bid: price = buyer budget × (1 - bidMarginPercent/100), ETA = current time + 48h. It calls `BidEngine.placeBid` with these values. Logs all actions to a structured JSON log. Write integration tests against a local Hardhat node (not testnet) that simulate the full polling cycle.
+Create `agents/src/agents/SupplyAgent.ts`. It takes a configuration object: `sellerWallet`, `categories` (array of strings), `maxBudgetWei`, `location`, `bidMarginPercent` (default: seller bids at 90% of buyer's budget). Using `ethers.Contract.on` with a fallback configurable polling interval (default 30s using `setInterval`), it calls `OrderBook.getOpenOrders(0, 20)`, filters orders by category match first, then budget threshold, and for each matching order checks if the seller has already bid (by querying `BidEngine.getBidsForOrder`). If not, it constructs a bid: price = buyer budget × (1 - bidMarginPercent/100), ETA = current time + 48h. It calls `BidEngine.placeBid` with these values. Logs all actions to a structured JSON log. Write integration tests against a local Hardhat node (not testnet) that simulate the full polling cycle. Document retry logic for missed events.
 
 **Resources**
 
@@ -395,7 +419,7 @@ Two additional agent services: `MatchingAgent` listens for `BidPlaced` events an
 
 **How to build it**
 
-`MatchingAgent`: Create `agents/src/agents/MatchingAgent.ts`. Use ethers.js event listeners on the `BidEngine` contract to subscribe to `BidPlaced(orderId, bidId, seller, price, eta)` events. On each event, fetch all bids for that order and score them using the formula: `score = (0.5 × priceScore) + (0.3 × etaScore) + (0.2 × reputationScore)` where each component is normalized to 0–1 across all bids for that order. Sort descending. Write ranked bid data to a Redis key or simple JSON file that the frontend can poll.
+`MatchingAgent`: Create `agents/src/agents/MatchingAgent.ts`. Use ethers.js event listeners on the `BidEngine` contract to subscribe to `BidPlaced(orderId, bidId, seller, price, eta)` events. On each event, fetch all bids for that order and score them using the formula: `score = (0.5 × priceScore) + (0.3 × etaScore) + (0.2 × reputationScore)` where each component is normalized to 0–1 across all bids for that order. Sort descending. Write ranked bid data to a Redis key or simple JSON file, and expose a `GET /api/bids/:orderId` Express endpoint for the frontend to poll. Add optional x402 `approve_payment` payload generation when a bid is accepted.
 
 `RampAgent`: Create `agents/src/agents/RampAgent.ts`. Load MoonPay and Transak API keys from `.env`. Expose a `getOnrampQuote(fiatAmount, fiatCurrency, targetStablecoin)` async function that calls both APIs in parallel via `Promise.all`, compares net amounts, and returns the better provider. Write tests using mocked API responses.
 
@@ -436,11 +460,11 @@ npx jest agents/src/agents/RampAgent.test.ts
 
 **What to build**
 
-The full onramp/offramp flow. A buyer initiates a purchase in fiat — the RampAgent picks the best provider, generates an onramp widget URL, the buyer completes fiat payment through the provider UI, the provider sends a webhook confirming USDC has landed in the buyer's wallet, and the RampAgent then calls `OrderBook.createOrder` with the received funds.
+The full onramp/offramp flow. A buyer initiates a purchase in fiat — the RampAgent picks the best provider, generates an onramp widget URL, the buyer completes fiat payment through the provider UI, the provider sends a webhook confirming KITE/USDC has landed in the buyer's wallet. The webhook listener receives confirmed fiat, calls a new `RampAgent.createOrderOnBehalf` that emits SSE `/events`. (MVP includes true Mode 2 gasless tx: user pays fiat, receives USDC, RampAgent relays transaction).
 
 **How to build it**
 
-Extend `RampAgent` with a full webhook listener using an Express.js endpoint at `/ramp/webhook`. Handle MoonPay's `transaction_completed` webhook and Transak's `ORDER_COMPLETED` webhook. Verify webhook signatures using HMAC with the provider's shared secret — never accept unverified webhooks. On confirmed completion, parse the received USDC amount and call `OrderBook.createOrder`. For the offramp (seller payout): after `BidEngine.releaseEscrow`, call the Transak or MoonPay offramp API to initiate a USDC → bank transfer with the seller's bank details (stored off-chain only, never on-chain). Test using provider sandbox environments — both MoonPay and Transak have dedicated sandbox modes with test cards.
+Extend `RampAgent` with a full webhook listener using an Express.js endpoint at `/ramp/webhook`. Handle MoonPay's `transaction_completed` webhook and Transak's `ORDER_COMPLETED` webhook. Verify webhook signatures using HMAC with the provider's shared secret — never accept unverified webhooks. On confirmed completion, parse the received USDC amount. The `RampAgent` then automatically submits `OrderBook.createOrderGasless` on behalf of the user using the EIP-3009 authorization signature previously captured from the frontend, paying the KITE gas fee itself. For the offramp (seller payout): after `OrderBook.releaseEscrow`, call the Transak or MoonPay offramp API to initiate a USDC → bank transfer with the seller's bank details (stored off-chain only, never on-chain). Test using provider sandbox environments — both MoonPay and Transak have dedicated sandbox modes with test cards.
 
 **Resources**
 
@@ -474,7 +498,7 @@ A Next.js 14 (App Router) frontend in the `frontend/` workspace. Pages: Home (br
 
 **How to build it**
 
-Initialize `frontend/` with `create-next-app` using TypeScript and Tailwind CSS. Install `wagmi`, `viem`, and `@rainbow-me/rainbowkit`. Configure wagmi with the Kite testnet chain definition — use the network info from Kite docs to build a custom chain object with the correct `id`, `rpcUrls`, and `nativeCurrency`. On the home page, use a `wagmi` `useReadContract` hook to call `OrderBook.getOpenOrders(0, 10)` and render order cards. Each card shows: item description, budget, deadline, number of bids, and order status badge. Add a navigation bar with the wallet connect button. The app loads and displays orders in read-only mode without a connected wallet.
+Initialize `frontend/` with `create-next-app` using TypeScript and Tailwind CSS. Install `wagmi`, `viem`, and `@rainbow-me/rainbowkit`. Configure wagmi with the Kite testnet chain definition — reference `docs/kite-testnet-config.md` to build a custom chain object with the correct `id`, `rpcUrls`, and `nativeCurrency`. On the home page, use a `wagmi` `useReadContract` hook to call `OrderBook.getOpenOrders(0, 10)` and render order cards. Each card shows: item description, budget, deadline, number of bids, and order status badge. Add a navigation bar with the wallet connect button. The app loads and displays orders in read-only mode without a connected wallet.
 
 **Resources**
 
@@ -502,11 +526,11 @@ Open browser at http://localhost:3000
 
 **What to build**
 
-The complete buyer journey. A multi-step form where the buyer types their request in natural language, the DemandAgent API parses it, a preview of the structured order is shown for confirmation, the RampAgent shows the best fiat payment option (MoonPay/Transak widget), and after payment confirmation the order appears on-chain and the buyer is redirected to their order tracking page.
+The complete buyer journey. A multi-step form where the buyer types their request in natural language, the DemandAgent API parses it, a preview of the structured order is shown for confirmation, the RampAgent shows the best fiat payment option (MoonPay/Transak widget), and after the RampAgent signs `createOrderGasless` as a relayer, the order appears on-chain and the buyer is redirected to their order tracking page.
 
 **How to build it**
 
-On the `/post` route, build a three-step form. Step 1: a natural language textarea and a "Parse my request" button that calls the DemandAgent backend via `fetch`. Step 2: a confirmation card showing the parsed `itemDescription`, `budget`, `deadline`, and `location` with an edit-and-reparse option. Step 3: embed the ramp payment widget — MoonPay as a hosted URL in an iframe, or Transak's React widget component. On payment confirmation (your backend emits a Server-Sent Event to the frontend via a `/events` endpoint), navigate to `/orders/[orderId]`. Use `react-hook-form` for form state and `zod` for client-side validation matching the agent-side schema.
+On the `/post` route, build a three-step form. Step 1: a natural language textarea and a "Parse my request" button that calls the DemandAgent backend via `fetch`. Step 2: a confirmation card showing the parsed `itemDescription`, `budget`, `deadline`, and `location` with an edit-and-reparse option. Step 3: Prompt the buyer to sign an EIP-712 off-chain message (EIP-3009 `transferWithAuthorization`) for the USDC budget. Send this signature to the backend. Step 4: Embed the ramp payment widget. On payment confirmation, the backend executes the gasless transaction and emits an SSE, then the frontend navigates to `/orders/[orderId]`. Use `react-hook-form` for form state and `zod` for client-side validation matching the agent-side schema.
 
 **Resources**
 
@@ -524,7 +548,7 @@ Manual E2E flow on Kite testnet sandbox:
           → Parse button fires → structured preview shows correctly
   Step 2: Confirm order details match parsed output
   Step 3: MoonPay sandbox widget loads without CORS errors
-  Step 4: Complete sandbox payment → webhook fires → order appears on-chain
+  Step 4: Complete sandbox payment → RampAgent executes gasless transaction → order appears on-chain
   Step 5: Browser redirects to /orders/[orderId] with status badge = Open
   ✓ All 5 steps complete without errors
 ```
@@ -635,47 +659,6 @@ Submission checklist (all required):
 
 ---
 
-### Issue #18 — Post-hackathon: USDC upgrade + mainnet prep
-
-**What to build**
-
-Upgrade the contracts from native token escrow to USDC (Kite's native stablecoin). Prepare for Kite mainnet deployment. This issue is post-hackathon but is documented here as the bridge from demo to production startup.
-
-**How to build it**
-
-Replace `msg.value` in `OrderBook.createOrder` and `BidEngine.releaseEscrow` with ERC-20 `transferFrom` / `transfer` calls against the Kite USDC contract address. Use OpenZeppelin's `IERC20` interface. Update the frontend to add an `approve` step before `createOrder` (call USDC `approve` on the OrderBook contract address, then `createOrder`). Update all tests to use a mock ERC-20. For mainnet prep: integrate the Kite gasless relayer so buyers don't pay gas manually. Integrate the Kite Account Abstraction SDK to remove wallet signing friction. Register AgentMart as a Kite module by locking the required KITE tokens per the tokenomics docs.
-
-**Resources**
-
-- Kite stablecoin (USDC) transfer docs: https://docs.gokite.ai/kite-chain/stablecoin-gasless-transfer
-- Kite gasless integration: https://docs.gokite.ai/kite-chain/9-gasless-integration
-- Kite Account Abstraction SDK: https://docs.gokite.ai/kite-chain/account-abstraction-sdk
-- OpenZeppelin ERC-20 interface: https://docs.openzeppelin.com/contracts/4.x/api/token/erc20
-- Kite module registration (tokenomics): https://docs.gokite.ai/get-started-why-kite/tokenomics
-
-**✅ Test pass**
-
-```
-npx hardhat test test/USDC_upgrade.test.ts
-  USDC Upgrade
-    ✓ OrderBook accepts ERC-20 USDC instead of native token
-    ✓ createOrder calls transferFrom correctly
-    ✓ insufficient USDC allowance reverts with correct message
-    ✓ releaseEscrow sends USDC to seller (not native token)
-    ✓ 1% fee deducted in USDC and sent to feeRecipient
-  5 passing (1.3s)
-
-Mainnet readiness checklist (track post-hackathon):
-  [ ] Kite mainnet RPC confirmed in hardhat.config.ts
-  [ ] KITE tokens acquired for module registration
-  [ ] Gasless relayer configured and smoke-tested
-  [ ] Account Abstraction SDK integrated and tested on frontend
-  [ ] Security review of all fund-moving functions completed
-  [ ] BUGS.md from Issue #16 fully resolved
-```
-
----
-
 ## Summary — Issue Index
 
 | # | Issue | Phase | Output |
@@ -687,6 +670,7 @@ Mainnet readiness checklist (track post-hackathon):
 | 5 | OrderBook contract | 1 | OrderBook.sol |
 | 6 | BidEngine + Escrow | 1 | BidEngine.sol |
 | 7 | DeliveryTracker + ProtocolFee | 1 | DeliveryTracker.sol, ProtocolFee.sol |
+| 7.5 | Full Deployment Script | 1 | scripts/deploy/full.ts |
 | 8 | Backend scaffold + chain client | 2 | agents/src/chain/ |
 | 9 | DemandAgent | 2 | agents/src/agents/DemandAgent.ts |
 | 10 | SupplyAgent | 2 | agents/src/agents/SupplyAgent.ts |
@@ -697,7 +681,6 @@ Mainnet readiness checklist (track post-hackathon):
 | 15 | Seller flow UI | 3 | frontend/app/dashboard/ |
 | 16 | E2E testnet run + bug fixes | 4 | BUGS.md, all services stable |
 | 17 | Submission polish | 4 | README, ARCHITECTURE, video |
-| 18 | USDC upgrade + mainnet prep | post-hack | contracts v2, mainnet config |
 
 ---
 
