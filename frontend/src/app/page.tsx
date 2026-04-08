@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { useReadContract } from "wagmi";
 import { CONTRACTS, OrderBookABI } from "@/config/contracts";
 import { formatEther } from "viem";

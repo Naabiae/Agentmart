@@ -1,13 +1,13 @@
 "use client";
 
-import { useAccount, useReadContract, useWriteContract } from "wagmi";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import { useAccount, useReadContract } from "wagmi";
 import { CONTRACTS, OrderBookABI } from "@/config/contracts";
-import { useState, useEffect } from "react";
 import { formatEther } from "viem";
 
 export default function Dashboard() {
   const { address } = useAccount();
-  const [bids, setBids] = useState<any[]>([]);
 
   // Fetch open orders
   const { data: orders, isLoading } = useReadContract({
@@ -57,7 +57,7 @@ export default function Dashboard() {
         <div>
           <h2 className="text-xl font-semibold mb-4 border-b pb-2">Agent Console</h2>
           <div className="bg-gray-900 rounded-lg p-4 font-mono text-sm text-green-400 h-96 overflow-y-auto shadow-inner">
-            <p className="text-gray-400 mb-2">// SupplyAgent v1.0.0 Online</p>
+            <p className="text-gray-400 mb-2">{`// SupplyAgent v1.0.0 Online`}</p>
             <p className="mb-1">{`> Loading seller profile for ${address ? address.slice(0,6) : '0x00'}...`}</p>
             <p className="mb-1">{`> Categories: ["Goods", "Services", "Digital", "Logistics", "Other"]`}</p>
             <p className="mb-1">{`> Margin setting: 90% of buyer budget`}</p>
@@ -68,7 +68,7 @@ export default function Dashboard() {
                 <p className="text-yellow-400">{`> [POLLING] Found ${(orders as any[]).length} open orders.`}</p>
                 <p>{`> [EVALUATING] Analyzing order ${(orders as any[])[0].orderId.slice(0,10)}...`}</p>
                 <p>{`> [MATCH] Category matched. Budget within limits.`}</p>
-                <p className="text-blue-300">{`> [ACTION] Initiating auto-bid at ${formatEther((orders as any[])[0].budgetWei) * 0.9} USDC`}</p>
+                <p className="text-blue-300">{`> [ACTION] Initiating auto-bid at ${Number(formatEther((orders as any[])[0].budgetWei)) * 0.9} USDC`}</p>
               </div>
             )}
           </div>
