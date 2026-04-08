@@ -8,6 +8,7 @@ export function NavBar() {
         <div className="flex items-center space-x-6">
           <Link href="/" className="text-xl font-bold text-blue-400">AgentMart</Link>
           <Link href="/post" className="hover:text-blue-300">Post Request</Link>
+          <Link href="/my-orders" className="hover:text-blue-300">My Orders</Link>
           <Link href="/dashboard" className="hover:text-blue-300">Seller Dashboard</Link>
         </div>
         <ConnectButton />
