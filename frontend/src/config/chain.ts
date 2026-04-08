@@ -1,7 +1,7 @@
 import { type Chain } from 'viem'
 
 export const kiteTestnet = {
-  id: 2368,
+  id: process.env.NEXT_PUBLIC_CHAIN_ID ? parseInt(process.env.NEXT_PUBLIC_CHAIN_ID) : 2368,
   name: 'Kite Ozone Testnet',
   nativeCurrency: {
     decimals: 18,
@@ -9,8 +9,8 @@ export const kiteTestnet = {
     symbol: 'KITE',
   },
   rpcUrls: {
-    default: { http: ['https://testnet.ozone.rpc.gokite.ai'] },
-    public: { http: ['https://testnet.ozone.rpc.gokite.ai'] },
+    default: { http: [process.env.NEXT_PUBLIC_RPC_URL || 'https://testnet.ozone.rpc.gokite.ai'] },
+    public: { http: [process.env.NEXT_PUBLIC_RPC_URL || 'https://testnet.ozone.rpc.gokite.ai'] },
   },
   blockExplorers: {
     default: { name: 'Kite Explorer', url: 'https://testnet.ozone.explorer.gokite.ai' },

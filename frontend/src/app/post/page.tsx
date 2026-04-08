@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import { useState } from "react";
 import { parseEther } from "viem";
 import { useAccount, useSignTypedData } from "wagmi";
 import { CONTRACTS } from "@/config/contracts";
@@ -19,7 +21,8 @@ export default function PostOrder() {
     if (!prompt) return;
     setLoading(true);
     try {
-      const res = await fetch("http://localhost:4000/api/parse-order", {
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+      const res = await fetch(`${API_BASE_URL}/api/parse-order`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt }),
@@ -50,7 +53,7 @@ export default function PostOrder() {
       const domain = {
         name: "Mock USDC", // Must match your mock or real stablecoin domain
         version: "1",
-        chainId: 31337, // Local testnet chain ID or Kite's 2368
+        chainId: process.env.NEXT_PUBLIC_CHAIN_ID ? parseInt(process.env.NEXT_PUBLIC_CHAIN_ID) : 31337, // Dynamic Chain ID
         verifyingContract: CONTRACTS.USDC as `0x${string}`,
       };
 
@@ -102,8 +105,9 @@ export default function PostOrder() {
         s
       };
 
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
       // Save signature to backend
-      await fetch("http://localhost:4000/api/ramp/signature", {
+      await fetch(`${API_BASE_URL}/api/ramp/signature`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clientId: address, payload }),
@@ -112,7 +116,7 @@ export default function PostOrder() {
       setStep(3);
 
       // Start listening to SSE for webhook completion
-      const evtSource = new EventSource(`http://localhost:4000/api/events/${address}`);
+      const evtSource = new EventSource(`${API_BASE_URL}/api/events/${address}`);
       evtSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
         if (data.status === "completed") {
@@ -132,7 +136,8 @@ export default function PostOrder() {
 
   const simulateWebhook = async () => {
     // We send a mock payload to the webhook endpoint using the dummy secret
-    await fetch("http://localhost:4000/api/ramp/webhook", {
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+    await fetch(`${API_BASE_URL}/api/ramp/webhook`, {
       method: "POST",
       headers: { 
         "Content-Type": "application/json",
